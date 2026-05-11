@@ -204,7 +204,7 @@ def gerar_mapa_ateg_consolidado():
         </script>
         """
         m.get_root().html.add_child(folium.Element(js_interface))
-        m.save("mapa_ateg_final.html")
+        m.save("index.html")
         print("✅ Mapa gerado com sucesso!")
 
     except Exception as e:
