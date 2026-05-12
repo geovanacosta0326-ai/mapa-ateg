@@ -44,14 +44,17 @@ def formatar_subtotais(df_base, col_agrupadora, valor_agrupador):
 # =========================================================
 def gerar_mapa_ateg_consolidado():
     try:
-        query_sql = "SELECT * FROM public.vw_mapa_consolidado_ateg_georrefercnaiAS"
+        # Acessando a nova view criada
+        query_sql = "SELECT * FROM public.vw_mapa_consolidado_ateg_georrefercnaias"
         with engine_pg.connect() as conn:
             df = pd.read_sql(text(query_sql), conn)
 
         if df.empty: return print("⚠️ Sem dados.")
 
-        df = df.assign(cod_ibge=df['codigos_ibge'].str.split(', ')).explode('cod_ibge')
+        # CORREÇÃO DO ERRO: Conversão explícita para string antes do split
+        df = df.assign(cod_ibge=df['codigos_ibge'].astype(str).str.split(', ')).explode('cod_ibge')
         df['cod_ibge'] = df['cod_ibge'].astype(str).str.strip()
+        
         df_coords = pd.read_csv("https://raw.githubusercontent.com/kelvins/municipios-brasileiros/main/csv/municipios.csv")
         df_coords['codigo_ibge'] = df_coords['codigo_ibge'].astype(str)
         df_final = df.merge(df_coords, left_on='cod_ibge', right_on='codigo_ibge', how='inner')
@@ -64,7 +67,7 @@ def gerar_mapa_ateg_consolidado():
             style_function=lambda x: {'fillColor': 'transparent', 'color': '#555555', 'weight': 0.5, 'fillOpacity': 0}
         ).add_to(m)
 
-        # --- NOVA LÓGICA DE CORES: MAPEANDO POR ATIVIDADE ---
+        # MAPEANDO CORES POR ATIVIDADE
         atividades = sorted(df_final['atividade'].dropna().unique())
         cor_atv_map = {atv: CORES_HEX[i % len(CORES_HEX)] for i, atv in enumerate(atividades)}
         
@@ -75,14 +78,13 @@ def gerar_mapa_ateg_consolidado():
         grupos_dict = {"S": {}, "R": {}, "A": {}}
 
         for _, row in df_final.iterrows():
-            # Define a cor com base na ATIVIDADE
             cor_hex = cor_atv_map.get(row['atividade'], '#457B9D')
             
             seed = int(hashlib.md5(row['tecnico'].encode()).hexdigest(), 16)
             lat_f = row['latitude'] + (((seed % 100) - 50) / 2000.0)
             lon_f = row['longitude'] + ((((seed // 100) % 100) - 50) / 2000.0)
 
-            # Popup Estilizado
+            # Popup Estilizado incluindo o nome do Projeto
             html_popup = f"""
             <div style="font-family: 'Segoe UI', Arial; width: 260px; padding: 5px;">
                 <div style="display: flex; align-items: center; margin-bottom: 12px;">
@@ -95,15 +97,18 @@ def gerar_mapa_ateg_consolidado():
                     </div>
                 </div>
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
-                <div style="background: {cor_hex}; color: white; padding: 4px 12px; border-radius: 20px; display: inline-block; font-size: 11px; font-weight: 600; margin-bottom: 15px;">
+                <div style="background: {cor_hex}; color: white; padding: 4px 12px; border-radius: 20px; display: inline-block; font-size: 11px; font-weight: 600; margin-bottom: 5px;">
                     {row['atividade'].upper()}
+                </div>
+                <div style="font-size: 10px; color: #7f8c8d; font-weight: bold; margin-bottom: 15px; text-transform: uppercase;">
+                    PROJETO: {row['projeto']}
                 </div>
                 <div style="font-size: 13px; color: #34495e;">
                     <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>👤 <b>Supervisor</b></span> <span style="color: #555;">{row['supervisor_atual']}</span></p>
                     <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>🌍 <b>Região</b></span> <span style="color: #555;">{row['regiao_faec']}</span></p>
                     <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>🏘️ <b>Município</b></span> <span style="color: #555;">{row['nome']}</span></p>
                     <p style="margin: 10px 0 5px 0; display: flex; justify-content: space-between; align-items: center;">
-                        <span>⏱️ <b>Projeto</b></span> 
+                        <span>⏱️ <b>Tempo de Projeto</b></span> 
                         <span style="color: #e67e22; font-weight: 800; font-size: 14px;">{int(row['tempo_projeto_meses'])} meses</span>
                     </p>
                 </div>
@@ -129,7 +134,6 @@ def gerar_mapa_ateg_consolidado():
 
         folium.LayerControl(collapsed=True).add_to(m)
 
-        # Interface CSS permanece a mesma
         js_interface = """
         <style>
             .leaflet-popup-content-wrapper { border-radius: 12px; }
@@ -176,7 +180,7 @@ def gerar_mapa_ateg_consolidado():
         """
         m.get_root().html.add_child(folium.Element(js_interface))
         m.save("index.html")
-        print("✅ Mapa atualizado: Cores agora por Atividade!")
+        print("✅ Mapa atualizado com sucesso!")
 
     except Exception as e: print(f"🔴 Erro: {e}")
 
