@@ -2,10 +2,8 @@ import pandas as pd
 import folium
 import folium.plugins
 import hashlib
-import requests
 from folium import DivIcon
 from sqlalchemy import create_engine, text
-import os
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -22,7 +20,11 @@ REGIOES_OFICIAIS = {
     "Região Maciço de Baturité", "Região Norte",
 }
 
-CORES_HEX = ["#E63946", "#457B9D", "#2D6A4F", "#7B2D8B", "#E76F51", "#8B0000", "#2A9D8F", "#1D3557"]
+# Cores vibrantes para as atividades
+CORES_HEX = [
+    "#E63946", "#457B9D", "#2D6A4F", "#7B2D8B", "#E76F51", 
+    "#8B0000", "#2A9D8F", "#1D3557", "#F4A261", "#606C38"
+]
 
 def criar_marcador_div(nome_tecnico, cor_hex, tempo_meses):
     tamanho = min(28 + int(float(tempo_meses or 0) / 3), 44)
@@ -42,9 +44,7 @@ def formatar_subtotais(df_base, col_agrupadora, valor_agrupador):
 # =========================================================
 def gerar_mapa_ateg_consolidado():
     try:
-        # Usando a sua View conforme solicitado anteriormente
         query_sql = "SELECT * FROM public.vw_mapa_consolidado_ateg_georrefercnaiAS"
-        
         with engine_pg.connect() as conn:
             df = pd.read_sql(text(query_sql), conn)
 
@@ -56,35 +56,37 @@ def gerar_mapa_ateg_consolidado():
         df_coords['codigo_ibge'] = df_coords['codigo_ibge'].astype(str)
         df_final = df.merge(df_coords, left_on='cod_ibge', right_on='codigo_ibge', how='inner')
 
+        m = folium.Map(location=[-5.2, -39.5], zoom_start=7, tiles='cartodbpositron')
+
+        # Divisórias Municipais
+        geojson_url = "https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-23-mun.json"
+        folium.GeoJson(geojson_url, name="Divisórias Municipais",
+            style_function=lambda x: {'fillColor': 'transparent', 'color': '#555555', 'weight': 0.5, 'fillOpacity': 0}
+        ).add_to(m)
+
+        # --- NOVA LÓGICA DE CORES: MAPEANDO POR ATIVIDADE ---
+        atividades = sorted(df_final['atividade'].dropna().unique())
+        cor_atv_map = {atv: CORES_HEX[i % len(CORES_HEX)] for i, atv in enumerate(atividades)}
+        
         contagem_sup = df_final.groupby('supervisor_atual')['tecnico'].nunique().to_dict()
         contagem_reg = df_final.groupby('regiao_faec')['tecnico'].nunique().to_dict()
         contagem_atv = df_final.groupby('atividade')['tecnico'].nunique().to_dict()
 
-        m = folium.Map(location=[-5.2, -39.5], zoom_start=7, tiles='cartodbpositron')
-
-        # ── DIVISÓRIAS MUNICIPAIS ──
-        geojson_url = "https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-23-mun.json"
-        folium.GeoJson(
-            geojson_url,
-            name="Divisórias Municipais",
-            style_function=lambda x: {'fillColor': 'transparent', 'color': '#555555', 'weight': 0.5, 'fillOpacity': 0}
-        ).add_to(m)
-
-        supervisores = sorted(df_final['supervisor_atual'].dropna().unique())
-        cor_hex_map = {sup: CORES_HEX[i % len(CORES_HEX)] for i, sup in enumerate(supervisores)}
         grupos_dict = {"S": {}, "R": {}, "A": {}}
 
         for _, row in df_final.iterrows():
-            cor_hex = cor_hex_map.get(row['supervisor_atual'], '#457B9D')
+            # Define a cor com base na ATIVIDADE
+            cor_hex = cor_atv_map.get(row['atividade'], '#457B9D')
+            
             seed = int(hashlib.md5(row['tecnico'].encode()).hexdigest(), 16)
             lat_f = row['latitude'] + (((seed % 100) - 50) / 2000.0)
             lon_f = row['longitude'] + ((((seed // 100) % 100) - 50) / 2000.0)
 
-            # ── CONSTRUÇÃO DO POPUP ESTILIZADO (MODELO SOLICITADO) ──
+            # Popup Estilizado
             html_popup = f"""
             <div style="font-family: 'Segoe UI', Arial; width: 260px; padding: 5px;">
                 <div style="display: flex; align-items: center; margin-bottom: 12px;">
-                    <div style="width: 45px; height: 45px; background: #1d3557; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; margin-right: 12px; border: 2px solid #eee;">
+                    <div style="width: 45px; height: 45px; background: {cor_hex}; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; margin-right: 12px; border: 2px solid #eee;">
                         {row['tecnico'][0].upper()}
                     </div>
                     <div>
@@ -93,13 +95,13 @@ def gerar_mapa_ateg_consolidado():
                     </div>
                 </div>
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
-                <div style="background: #1d3557; color: white; padding: 4px 12px; border-radius: 20px; display: inline-block; font-size: 11px; font-weight: 600; margin-bottom: 15px; letter-spacing: 0.5px;">
-                    {row['supervisor_atual'].upper()}
+                <div style="background: {cor_hex}; color: white; padding: 4px 12px; border-radius: 20px; display: inline-block; font-size: 11px; font-weight: 600; margin-bottom: 15px;">
+                    {row['atividade'].upper()}
                 </div>
                 <div style="font-size: 13px; color: #34495e;">
+                    <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>👤 <b>Supervisor</b></span> <span style="color: #555;">{row['supervisor_atual']}</span></p>
                     <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>🌍 <b>Região</b></span> <span style="color: #555;">{row['regiao_faec']}</span></p>
                     <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>🏘️ <b>Município</b></span> <span style="color: #555;">{row['nome']}</span></p>
-                    <p style="margin: 5px 0; display: flex; justify-content: space-between;"><span>🌱 <b>Atividade</b></span> <span style="color: #555;">{row['atividade']}</span></p>
                     <p style="margin: 10px 0 5px 0; display: flex; justify-content: space-between; align-items: center;">
                         <span>⏱️ <b>Projeto</b></span> 
                         <span style="color: #e67e22; font-weight: 800; font-size: 14px;">{int(row['tempo_projeto_meses'])} meses</span>
@@ -118,7 +120,6 @@ def gerar_mapa_ateg_consolidado():
                 if label not in grupos_dict[tipo]:
                     grupos_dict[tipo][label] = folium.FeatureGroup(name=label, show=mostrar).add_to(m)
                 
-                # Criando o marcador com o Popup em vez de Tooltip
                 marker = folium.Marker(
                     [lat_f, lon_f], 
                     icon=criar_marcador_div(row['tecnico'], cor_hex, row['tempo_projeto_meses'])
@@ -128,26 +129,19 @@ def gerar_mapa_ateg_consolidado():
 
         folium.LayerControl(collapsed=True).add_to(m)
 
-        # ── INTERFACE CSS (Mobile e Organização do Menu) ──
+        # Interface CSS permanece a mesma
         js_interface = """
         <style>
-            .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); }
-            .leaflet-control-layers-expanded { font-family: 'Segoe UI', Arial; width: 380px !important; border-radius: 8px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
-            @media (max-width: 600px) {
-                .leaflet-control-layers-expanded { width: 90vw !important; max-width: 320px !important; font-size: 10px !important; max-height: 70vh !important; }
-                .btn-mapa { padding: 10px 5px !important; font-size: 10px !important; }
-            }
+            .leaflet-popup-content-wrapper { border-radius: 12px; }
+            .leaflet-control-layers-expanded { font-family: 'Segoe UI', Arial; width: 380px !important; border-radius: 8px; }
+            @media (max-width: 600px) { .leaflet-control-layers-expanded { width: 90vw !important; } }
             .btn-mapa { width: 48%; padding: 8px; cursor: pointer; font-size: 11px; font-weight: bold; border-radius: 5px; border: none; background: #34495e; color: white; margin-bottom: 10px; }
             summary { background: #2c3e50; color: white; padding: 10px; cursor: pointer; font-weight: bold; font-size: 11px; border-radius: 5px; margin-top: 5px; }
             .lista-interna { padding: 5px; max-height: 400px; overflow-y: auto; background: #f8f9fa; }
             label { display: block; padding: 6px; border-bottom: 1px solid #eee; font-size: 11px; }
         </style>
         <script>
-        function toggleMap(v) {
-            document.querySelectorAll('.leaflet-control-layers-selector').forEach(cb => {
-                if (cb.checked !== v) cb.click();
-            });
-        }
+        function toggleMap(v) { document.querySelectorAll('.leaflet-control-layers-selector').forEach(cb => { if (cb.checked !== v) cb.click(); }); }
         document.addEventListener('DOMContentLoaded', function () {
             var observer = new MutationObserver(function () {
                 var list = document.querySelector('.leaflet-control-layers-list');
@@ -182,7 +176,7 @@ def gerar_mapa_ateg_consolidado():
         """
         m.get_root().html.add_child(folium.Element(js_interface))
         m.save("index.html")
-        print("✅ Mapa atualizado com o card de informações clicável!")
+        print("✅ Mapa atualizado: Cores agora por Atividade!")
 
     except Exception as e: print(f"🔴 Erro: {e}")
 
