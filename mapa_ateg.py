@@ -183,3 +183,5 @@ def gerar_mapa_ateg_consolidado():
     except Exception as e: print(f"🔴 Erro: {e}")
 
 if __name__ == "__main__": gerar_mapa_ateg_consolidado()
+
+#streamlit run mapa_ateg.py
